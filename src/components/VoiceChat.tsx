@@ -24,17 +24,22 @@ export default function VoiceChat({ userId, userName, token }: VoiceChatProps) {
   useEffect(() => {
     const initializeServices = async () => {
       try {
+        console.log('Initializing services...');
+
         // SkyWayサービスの初期化
         const skyway = new SkyWayService();
-        await skyway.initialize(userId);
+        const skywayInitialized = await skyway.initialize(userId);
+        console.log('SkyWay initialized:', skywayInitialized);
         skywayRef.current = skyway;
 
         // Socket.ioの初期化
         socketService.initialize(token, skyway);
+        console.log('Socket.io initialized');
 
         // オンラインユーザーリストの購読
         const unsubscribe = socketService.onUserList((users) => {
-          setOnlineUsers(users.filter(user => user.id !== userId));
+          console.log('Received online users:', users);
+          setOnlineUsers(users);
         });
 
         // 着信イベントのリスナー
@@ -49,7 +54,7 @@ export default function VoiceChat({ userId, userName, token }: VoiceChatProps) {
         // 通話応答イベントのリスナー
         const unsubscribeAnswer = socketService.onCallAnswered(async () => {
           if (skywayRef.current) {
-            await skywayRef.current.publishAudio();
+            await skywayRef.current.publishAudio(userId);
             setIsAudioEnabled(true);
 
             // 音声ストリームを設定
@@ -102,7 +107,7 @@ export default function VoiceChat({ userId, userName, token }: VoiceChatProps) {
       await skywayRef.current.joinRoom(roomId, userId);
 
       // 音声ストリームを公開
-      await skywayRef.current.publishAudio();
+      await skywayRef.current.publishAudio(userId);
       setIsAudioEnabled(true);
 
       // 通話状態を更新
@@ -125,7 +130,7 @@ export default function VoiceChat({ userId, userName, token }: VoiceChatProps) {
       await skywayRef.current.joinRoom(roomId, userId);
 
       // 音声ストリームを公開
-      await skywayRef.current.publishAudio();
+      await skywayRef.current.publishAudio(userId);
       setIsAudioEnabled(true);
 
       // 通話状態を更新
@@ -162,7 +167,7 @@ export default function VoiceChat({ userId, userName, token }: VoiceChatProps) {
 
     try {
       // ルームから退出
-      await skywayRef.current.leaveRoom();
+      await skywayRef.current.leaveRoom(userId);
 
       // 相手に通話終了を通知
       socketService.endCall(currentCall.userId);
