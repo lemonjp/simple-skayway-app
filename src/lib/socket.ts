@@ -14,17 +14,22 @@ class SocketService {
   // Socket.ioクライアントを初期化する
   initialize(token: string, skyway: SkyWayService) {
     if (this.socket && this.socket.connected) {
+      console.log('Socket already connected');
       return;
     }
 
     this.skyway = skyway;
 
+    console.log('Initializing socket with token:', token);
+
     // Socket.ioクライアントを作成
     this.socket = io('http://localhost:3001', {
       auth: { token },
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
+      reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
+      timeout: 10000,
     });
 
     // 接続イベント
@@ -32,13 +37,27 @@ class SocketService {
       console.log('Connected to socket server');
     });
 
+    // 接続エラーイベント
+    this.socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+      // 再接続を試みる
+      setTimeout(() => {
+        this.socket?.connect();
+      }, 1000);
+    });
+
     // 切断イベント
-    this.socket.on('disconnect', () => {
-      console.log('Disconnected from socket server');
+    this.socket.on('disconnect', (reason) => {
+      console.log('Disconnected from socket server:', reason);
+      if (reason === 'io server disconnect') {
+        // サーバーが切断を要求した場合は再接続を試みる
+        this.socket?.connect();
+      }
     });
 
     // オンラインユーザーリストを受信
     this.socket.on('users', (users) => {
+      console.log('Received users:', users);
       this.onlineUsers = users;
       this.userListeners.forEach(listener => listener(users));
     });

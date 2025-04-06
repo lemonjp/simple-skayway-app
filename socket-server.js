@@ -17,7 +17,7 @@ const io = new Server(httpServer, {
 });
 
 // ユーザー情報の管理
-const users = [];
+let users = [];
 
 // JWT検証関数
 const verifyToken = (token) => {
@@ -29,9 +29,14 @@ const verifyToken = (token) => {
   }
 };
 
+// サーバー起動時にユーザーリストをクリア
+users = [];
+console.log('Server started, users list cleared');
+
 // 接続イベント
 io.on('connection', async (socket) => {
   console.log('New client connected:', socket.id);
+  console.log('Auth token:', socket.handshake.auth.token);
 
   const authToken = socket.handshake.auth.token;
   if (!authToken) {
@@ -52,31 +57,43 @@ io.on('connection', async (socket) => {
   const userName = payload.name;
 
   console.log(`User authenticated: ${userName} (${userId})`);
+  console.log('Current users:', users);
+
+  // 既存のユーザーを確認し、オフラインのものを削除
+  users = users.filter(user => user.isOnline);
 
   // ユーザーをオンラインに設定
   const existingUserIndex = users.findIndex((user) => user.id === userId);
   if (existingUserIndex !== -1) {
     users[existingUserIndex].socketId = socket.id;
     users[existingUserIndex].isOnline = true;
+    console.log('Updated existing user:', users[existingUserIndex]);
   } else {
-    users.push({
+    const newUser = {
       id: userId,
       name: userName,
       socketId: socket.id,
       isOnline: true,
-    });
+    };
+    users.push(newUser);
+    console.log('Added new user:', newUser);
   }
 
-  // 全ユーザーにオンラインユーザーリストを送信
-  io.emit('users', users);
+  // 全ユーザーにオンラインユーザーリストを送信（自分自身を除外）
+  const onlineUsers = users.filter(user => user.id !== userId && user.isOnline);
+  console.log('Sending online users:', onlineUsers);
+  io.emit('users', onlineUsers);
 
   // 切断イベント
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     const userIndex = users.findIndex((user) => user.socketId === socket.id);
     if (userIndex !== -1) {
-      users[userIndex].isOnline = false;
-      io.emit('users', users);
+      // ユーザーを削除
+      users.splice(userIndex, 1);
+      console.log('User removed:', users);
+      // 更新されたユーザーリストを送信
+      io.emit('users', users.filter(user => user.isOnline));
     }
   });
 
