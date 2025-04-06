@@ -1,4 +1,4 @@
-import { SkyWayContext, SkyWayRoom, SkyWayStreamFactory, P2PRoom, type RoomPublication, RoomMember } from '@skyway-sdk/room';
+import { SkyWayContext, SkyWayRoom, SkyWayStreamFactory, P2PRoom, type RoomPublication, LocalRoomMember } from '@skyway-sdk/room';
 import { nowInSec, RemoteAudioStream, SkyWayAuthToken, uuidV4 } from '@skyway-sdk/core';
 
 const appId = process.env.NEXT_PUBLIC_SKYWAY_APP_ID || '';
@@ -51,6 +51,7 @@ const token = new SkyWayAuthToken({
 export class SkyWayService {
   private context: SkyWayContext | null = null;
   private room: P2PRoom | null = null;
+  private localMember: any | null = null;
   private localAudioStream: MediaStream | null = null;
   private remoteAudioStream: MediaStream | null = null;
   private audioEnabled = false;
@@ -75,7 +76,6 @@ export class SkyWayService {
     }
 
     try {
-      // ルームに参加
       const room = await SkyWayRoom.FindOrCreate(this.context, {
         type: 'p2p',
         name: roomId,
@@ -83,20 +83,17 @@ export class SkyWayService {
 
       this.room = room as P2PRoom;
 
-      // ルームにメンバーとして参加
-      const localMember = await this.room.join({
-        name: userId,
+      // メンバー名を一意にするために、タイムスタンプを追加
+      const uniqueMemberName = `${userId}-${Date.now()}`;
+      this.localMember = await this.room.join({
+        name: uniqueMemberName,
         metadata: JSON.stringify({ userId }),
       });
 
-      // 音声ストリームを公開
       const audioStream = await SkyWayStreamFactory.createMicrophoneAudioStream();
-      await localMember.publish(audioStream);
+      await this.localMember.publish(audioStream);
 
-      // 既存のパブリケーションを購読
       this.subscribeToExistingPublications(userId);
-
-      // 新しいパブリケーションが公開されたときのイベントリスナー
       this.room.onStreamPublished.add((e) => {
         this.subscribeToPublication(e.publication, userId);
       });
@@ -110,24 +107,17 @@ export class SkyWayService {
 
   // 音声ストリームの取得と公開
   async publishAudio(userId: string) {
-    if (!this.room) {
-      throw new Error('Room not joined');
+    if (!this.room || !this.localMember) {
+      throw new Error('Room not joined or member not found');
     }
 
     try {
-      // ルームにメンバーとして参加
-      const localMember = await this.room.join({
-        name: userId,
-        metadata: JSON.stringify({ userId }),
-      });
-      // 音声ストリームを取得
       this.localAudioStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: false,
       });
-      // 音声ストリームを公開
       const audioStream = await SkyWayStreamFactory.createMicrophoneAudioStream();
-      await localMember.publish(audioStream);
+      await this.localMember.publish(audioStream);
 
       this.audioEnabled = true;
       return true;
@@ -150,13 +140,16 @@ export class SkyWayService {
   private async subscribeToPublication(publication: RoomPublication, userId: string) {
     if (!this.room) return;
 
-    // 自分自身の公開なら購読しない
-    const localMember = this.room.members.find(member => member.id === userId);
-    if (publication.publisher.id === localMember?.id) return;
-
     try {
+      // メタデータからユーザーIDを取得
+      const publisherMetadata = JSON.parse(publication.publisher.metadata || '{}');
+      const publisherId = publisherMetadata.userId;
+
+      // 自分自身の公開なら購読しない
+      if (publisherId === userId) return;
+
       // パブリケーションを購読
-      const subscription = await localMember?.subscribe(publication.id);
+      const subscription = await this.localMember?.subscribe(publication.id);
       // 音声ストリームを処理
       if (subscription?.subscription.stream instanceof RemoteAudioStream) {
         // リモートストリームに追加
